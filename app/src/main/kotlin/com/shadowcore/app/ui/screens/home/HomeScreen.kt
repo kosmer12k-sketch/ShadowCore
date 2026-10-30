@@ -1,9 +1,14 @@
 package com.shadowcore.app.ui.screens.home
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Download
@@ -14,9 +19,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shadowcore.app.domain.model.CapabilityTier
@@ -113,11 +122,23 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxSize().padding(padding),
             )
         } else {
+            val runningCount = state.veProfiles.count { it.state is VeState.Running }
+
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
+                // Overview Dashboard Card
+                item {
+                    OverviewDashboardCard(
+                        totalCount = state.veProfiles.size,
+                        runningCount = runningCount,
+                        tier = state.capabilityTier,
+                    )
+                }
+
+                // Environment Cards
                 items(
                     items = state.veProfiles,
                     key = { it.id },
@@ -139,6 +160,87 @@ fun HomeScreen(
                 }
                 // Bottom spacer for FAB
                 item { Spacer(modifier = Modifier.height(80.dp)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OverviewDashboardCard(
+    totalCount: Int,
+    runningCount: Int,
+    tier: CapabilityTier,
+) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                Text(
+                    text = "VIRTUAL ENVIRONMENTS",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    letterSpacing = 0.5.sp,
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "$totalCount Configured",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+
+            // Running badge
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        if (runningCount > 0) VeRunning.copy(alpha = 0.15f)
+                        else MaterialTheme.colorScheme.surfaceContainer
+                    )
+                    .border(
+                        1.dp,
+                        if (runningCount > 0) VeRunning.copy(alpha = 0.4f)
+                        else Color.Transparent,
+                        RoundedCornerShape(20.dp)
+                    )
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                if (runningCount > 0) {
+                    val pulse = rememberInfiniteTransition(label = "pulse").animateFloat(
+                        initialValue = 0.4f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+                        label = "p"
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(VeRunning.copy(alpha = pulse.value))
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(
+                    text = if (runningCount > 0) "$runningCount Active" else "All Stopped",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (runningCount > 0) VeRunning else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

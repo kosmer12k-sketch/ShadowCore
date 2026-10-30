@@ -75,7 +75,7 @@ object EngineModule {
             BlackBoxContainerEngine(context)
         } else {
             android.util.Log.i("EngineModule", "BlackBox SDK not found — using stub engine")
-            StubContainerEngine()
+            StubContainerEngine(context)
         }
     }
 }

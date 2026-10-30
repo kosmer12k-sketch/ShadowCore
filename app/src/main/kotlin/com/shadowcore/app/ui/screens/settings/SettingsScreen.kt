@@ -5,10 +5,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.CleaningServices
+import androidx.compose.material.icons.rounded.Memory
+import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -23,8 +27,17 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(state.snackbarMessage) {
+        state.snackbarMessage?.let {
+            snackbarHostState.showSnackbar(it, duration = SnackbarDuration.Short)
+            viewModel.clearSnackbarMessage()
+        }
+    }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Settings") },
@@ -44,11 +57,35 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            // Engine Architecture
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(Icons.Rounded.Memory, null, tint = MaterialTheme.colorScheme.primary)
+                        Text("Virtualization Engine", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                    HorizontalDivider()
+
+                    SettingInfoRow("Active Backend", state.engineName, MaterialTheme.colorScheme.primary)
+                    SettingInfoRow("BlackBox Core", if (state.isBlackBoxAvailable) "✓ Linked" else "○ Sandbox Fallback")
+                    SettingInfoRow("Hardware Mode", if (state.capabilityReport?.hasAvf == true) "AVF Supported" else "Standard Isolation")
+                }
+            }
+
             // Device Capability
             state.capabilityReport?.let { report ->
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Device Capability", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(Icons.Rounded.Security, null, tint = MaterialTheme.colorScheme.secondary)
+                            Text("Device Capability", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        }
                         HorizontalDivider()
 
                         val tierColor = when (report.tier) {
@@ -65,6 +102,33 @@ fun SettingsScreen(
                         SettingInfoRow("AVF", if (report.hasAvf) "✓ Available" else "✗ Not available")
                         SettingInfoRow("GPU Passthrough", if (report.hasGpuPassthrough) "✓ Available" else "✗ Not available")
                         SettingInfoRow("RAM", "${report.availableRamMb}MB / ${report.totalRamMb}MB")
+                    }
+                }
+            }
+
+            // Storage & Maintenance
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(Icons.Rounded.CleaningServices, null, tint = Color(0xFFFFB74D))
+                        Text("Storage & Maintenance", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                    HorizontalDivider()
+
+                    SettingInfoRow("Temporary Cache", state.cacheSizeMb)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        OutlinedButton(
+                            onClick = { viewModel.clearCache() },
+                        ) {
+                            Text("Clear Cache")
+                        }
                     }
                 }
             }
@@ -125,7 +189,7 @@ fun SettingsScreen(
 private fun SettingInfoRow(
     label: String,
     value: String,
-    valueColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface,
+    valueColor: Color = MaterialTheme.colorScheme.onSurface,
 ) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

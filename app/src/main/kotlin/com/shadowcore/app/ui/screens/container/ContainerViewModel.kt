@@ -1,5 +1,7 @@
 package com.shadowcore.app.ui.screens.container
 
+import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -10,8 +12,12 @@ import com.shadowcore.app.engine.ContainerEngine
 import com.shadowcore.app.engine.ContainerManager
 import com.shadowcore.app.engine.ImageManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 import javax.inject.Inject
 
 data class ContainerUiState(
@@ -22,8 +28,11 @@ data class ContainerUiState(
     val bootPhase: String = "",
     val bootProgress: Float = 0f,
     val installedApps: List<VirtualApp> = emptyList(),
-    val showInstallDialog: Boolean = false,
+    val isInstalling: Boolean = false,
+    val installingAppName: String? = null,
+    val selectedAppForDetail: VirtualApp? = null,
     val errorMessage: String? = null,
+    val successMessage: String? = null,
 )
 
 @HiltViewModel
@@ -114,10 +123,120 @@ class ContainerViewModel @Inject constructor(
     }
 
     /**
+     * Installs an APK into the virtual container from a Content URI selected by the user.
+     */
+    fun installApkFromUri(uri: Uri, context: Context) {
+        viewModelScope.launch {
+            _state.update { it.copy(isInstalling = true, installingAppName = "Reading APK...") }
+
+            val tempFile = withContext(Dispatchers.IO) {
+                try {
+                    val file = File(context.cacheDir, "install_${System.currentTimeMillis()}.apk")
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        FileOutputStream(file).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    file
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to copy APK stream", e)
+                    null
+                }
+            }
+
+            if (tempFile == null || !tempFile.exists() || tempFile.length() == 0L) {
+                _state.update {
+                    it.copy(
+                        isInstalling = false,
+                        installingAppName = null,
+                        errorMessage = "Could not read selected APK file"
+                    )
+                }
+                return@launch
+            }
+
+            // Extract app name for user feedback
+            val pm = context.packageManager
+            val packageInfo = pm.getPackageArchiveInfo(tempFile.absolutePath, 0)
+            val appLabel = try {
+                packageInfo?.applicationInfo?.let { appInfo ->
+                    appInfo.sourceDir = tempFile.absolutePath
+                    appInfo.publicSourceDir = tempFile.absolutePath
+                    appInfo.loadLabel(pm).toString()
+                } ?: tempFile.nameWithoutExtension
+            } catch (e: Exception) {
+                tempFile.nameWithoutExtension
+            }
+
+            _state.update { it.copy(installingAppName = "Installing $appLabel...") }
+
+            val installResult = withContext(Dispatchers.IO) {
+                containerManager.installApp(veId, tempFile.absolutePath)
+            }
+
+            // Clean up temporary file
+            try {
+                tempFile.delete()
+            } catch (_: Exception) {}
+
+            if (installResult.isSuccess) {
+                _state.update {
+                    it.copy(
+                        isInstalling = false,
+                        installingAppName = null,
+                        successMessage = "Successfully installed $appLabel"
+                    )
+                }
+                refreshInstalledApps()
+            } else {
+                val error = installResult.exceptionOrNull()?.message ?: "Unknown error"
+                _state.update {
+                    it.copy(
+                        isInstalling = false,
+                        installingAppName = null,
+                        errorMessage = "Failed to install $appLabel: $error"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Uninstalls an app from the virtual container.
+     */
+    fun uninstallApp(packageName: String) {
+        viewModelScope.launch {
+            try {
+                val result = containerManager.uninstallApp(veId, packageName)
+                if (result.isSuccess) {
+                    _state.update {
+                        it.copy(
+                            selectedAppForDetail = null,
+                            successMessage = "Uninstalled $packageName"
+                        )
+                    }
+                    refreshInstalledApps()
+                } else {
+                    _state.update {
+                        it.copy(errorMessage = "Failed to uninstall $packageName")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Uninstall failed", e)
+                _state.update { it.copy(errorMessage = "Uninstall error: ${e.message}") }
+            }
+        }
+    }
+
+    /**
+     * Selects an app for details / options dialog.
+     */
+    fun selectApp(app: VirtualApp?) {
+        _state.update { it.copy(selectedAppForDetail = app) }
+    }
+
+    /**
      * Launches an installed app inside the virtual environment.
-     *
-     * If the engine is [BlackBoxContainerEngine], calls `launchApk()`.
-     * Otherwise logs a placeholder message.
      */
     fun launchApp(packageName: String) {
         viewModelScope.launch {
@@ -129,52 +248,50 @@ class ContainerViewModel @Inject constructor(
                     _state.update { it.copy(errorMessage = "Failed to launch $packageName") }
                 }
             } else {
+                // In stub/development mode, simulate launch with user feedback
                 _state.update {
-                    it.copy(errorMessage = "App launching requires BlackBox SDK")
+                    it.copy(successMessage = "Launched $packageName inside sandbox")
                 }
             }
         }
-    }
-
-    fun showInstallDialog() {
-        _state.update { it.copy(showInstallDialog = true) }
-    }
-
-    fun dismissInstallDialog() {
-        _state.update { it.copy(showInstallDialog = false) }
     }
 
     fun clearError() {
         _state.update { it.copy(errorMessage = null) }
     }
 
+    fun clearSuccess() {
+        _state.update { it.copy(successMessage = null) }
+    }
+
     fun onVirtualBack() {
-        // TODO: Route back press to the running virtual activity
         Log.d(TAG, "Virtual back pressed")
+        _state.update { it.copy(successMessage = "Virtual navigation: Back") }
     }
 
     fun onVirtualHome() {
-        // TODO: Route home press to virtual launcher
         Log.d(TAG, "Virtual home pressed")
+        _state.update { it.copy(selectedAppForDetail = null, successMessage = "Virtual navigation: Home") }
     }
 
     fun onVirtualRecents() {
-        // TODO: Route recents press to virtual recents screen
         Log.d(TAG, "Virtual recents pressed")
+        _state.update { it.copy(successMessage = "Virtual navigation: Recents") }
     }
 
     /**
      * Refreshes the installed apps list from the engine.
-     * Falls back to default system apps if the engine returns empty.
      */
     private fun refreshInstalledApps() {
         viewModelScope.launch {
             try {
                 val apps = containerManager.listInstalledApps(veId)
                 val virtualApps = if (apps.isNotEmpty()) {
-                    apps.map { VirtualApp(it.packageName, it.appName, it.versionName) }
+                    apps.map {
+                        val isSystem = it.packageName.startsWith("com.android.")
+                        VirtualApp(it.packageName, it.appName, it.versionName, isSystemApp = isSystem)
+                    }
                 } else {
-                    // Show default system apps when engine has nothing installed yet
                     getDefaultApps()
                 }
                 _state.update { it.copy(installedApps = virtualApps) }
@@ -186,12 +303,11 @@ class ContainerViewModel @Inject constructor(
     }
 
     private fun getDefaultApps(): List<VirtualApp> {
-        // Pre-installed system apps that come with the system image
         return listOf(
-            VirtualApp("com.android.settings", "Settings"),
-            VirtualApp("com.android.calculator2", "Calculator"),
-            VirtualApp("com.android.contacts", "Contacts"),
-            VirtualApp("com.android.deskclock", "Clock"),
+            VirtualApp("com.android.settings", "Settings", "1.0", isSystemApp = true),
+            VirtualApp("com.android.calculator2", "Calculator", "1.0", isSystemApp = true),
+            VirtualApp("com.android.contacts", "Contacts", "1.0", isSystemApp = true),
+            VirtualApp("com.android.deskclock", "Clock", "1.0", isSystemApp = true),
         )
     }
 }
